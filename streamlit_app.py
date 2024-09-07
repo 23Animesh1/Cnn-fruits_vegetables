@@ -1,151 +1,72 @@
 import streamlit as st
-import pandas as pd
-import math
-from pathlib import Path
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+import cv2
 
-# Set the title and favicon that appear in the Browser's tab bar.
+# Set the title and favicon that appear in the browser's tab bar.
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title='Fruit and Vegetable Classifier',
+    page_icon='🍎',  # This is an emoji shortcode. Could be a URL too.
 )
 
 # -----------------------------------------------------------------------------
 # Declare some useful functions.
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+@st.cache_resource
+def load_model():
+    """Load the pre-trained CNN model."""
+    model = tf.keras.models.load_model('/content/drive/MyDrive/Deep learning project/trained_model.h5')
+    return model
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+def preprocess_image(image):
+    """Preprocess the image for prediction."""
+    img_array = np.array(image)
+    img_array = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
+    img_array = cv2.resize(img_array, (64, 64))  # Resize to the model's input size
+    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+    return img_array
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
+def predict_image(model, img_array):
+    """Make a prediction for a single image."""
+    predictions = model.predict(img_array)
+    result_index = np.argmax(predictions)  # Return index of max element
+    return result_index, predictions
 
 # -----------------------------------------------------------------------------
 # Draw the actual page
 
 # Set the title that appears at the top of the page.
 '''
-# :earth_americas: GDP dashboard
+# 🍎 Fruit and Vegetable Classifier
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
+Upload an image of a fruit or vegetable, and this app will classify it!
 '''
 
-# Add some spacing
-''
-''
+# Load the pre-trained model
+cnn_model = load_model()
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
+# File uploader for image
+uploaded_image = st.file_uploader("Choose an image...", type=["jpg", "png", "jpeg"])
 
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
+if uploaded_image is not None:
+    # Display the uploaded image
+    image = Image.open(uploaded_image)
+    st.image(image, caption='Uploaded Image', use_column_width=True)
 
-countries = gdp_df['Country Code'].unique()
+    # Preprocess the image and predict
+    img_array = preprocess_image(image)
+    class_index, prediction = predict_image(cnn_model, img_array)
 
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+    # Display prediction result
+    st.write(f"Predicted class index: {class_index}")
+    
+    # Assuming you have a list of class names to map index to name
+    class_names = ['Apple', 'Banana', 'Tomato', 'Potato', 'Carrot', 'etc.']  # Add your actual class names here
+    st.write(f"Predicted class: {class_names[class_index]}")
+    
+    # Display prediction probabilities
+    st.write("Prediction Probabilities:")
+    for i, class_name in enumerate(class_names):
+        st.write(f"{class_name}: {prediction[0][i] * 100:.2f}%")
